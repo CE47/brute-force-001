@@ -713,7 +713,7 @@ if not "%CURLCODE%"=="200" (
   call :fail "Kibana refused to create the data view !DVPAT!, HTTP %CURLCODE%" "The log data is still loaded. Check  docker logs %SCEN%-kibana  and run this file again."
   exit /b 1
 )
-call :docurl -s -o "%WORK%\dv-find.json" %KBAUTH% "%KBURL%/api/saved_objects/_find?type=index-pattern^&search_fields=title^&search=!DVPAT!^&fields=title^&per_page=50"
+call :docurl -s -o "%WORK%\dv-find.json" %KBAUTH% "%KBURL%/api/saved_objects/_find?type=index-pattern&search_fields=title&search=!DVPAT!&fields=title&per_page=50"
 findstr /c:"!DVPAT!" "%WORK%\dv-find.json" >nul 2>&1
 if errorlevel 1 (
   echo  ERROR: the data view was created but the pattern "!DVPAT!" was not stored.
@@ -867,16 +867,34 @@ rem     %~3 is an optional query body.  Without it this is a plain count of
 rem     everything in the index; with one it counts only what matches, which is
 rem     how :mkrule asks "is this rule already installed" without needing a
 rem     response it would then have to take apart in batch.
+rem
+rem     The query string is written out in full on both CALL lines instead of
+rem     being parked in a variable, and that is not untidiness.  A URL that
+rem     holds an ampersand cannot travel through CALL in cmd.exe:
+rem
+rem       ^& in the command text   -> CALL parses the line a second time and
+rem                                    hands curl.exe a doubled ^^, which
+rem                                    Elasticsearch answers with HTTP 400
+rem                                    "Could not convert [allow_no_indices] to
+rem                                    boolean".  The whole lab then stops at
+rem                                    step 7 with a count error that has
+rem                                    nothing to do with counts.
+rem       &  in a variable          -> CALL drops the argument's quotes, the
+rem                                    ampersand becomes a command separator
+rem                                    and the line falls apart.
+rem
+rem     A bare & typed straight into a quoted argument in the command text is
+rem     the one form cmd.exe passes through untouched, so that is what is used
+rem     here and in :mkdataview.  Do not "tidy" either URL back into a variable.
 :esdocount
 set "EDIDX=%~1"
 set "EDVAR=%~2"
 set "EDQ=%~3"
-set "EDCNTURL=%ESURL%/%EDIDX%/_count?allow_no_indices=true^&filter_path=count"
 call :docurl -s -o nul -X POST %ESAUTH% "%ESURL%/%EDIDX%/_refresh"
 if defined EDQ (
-  call :docurl -s -o "%WORK%\cnt.json" %ESAUTH% -X POST -H "Content-Type: application/json" --data-binary "@%EDQ%" "%EDCNTURL%"
+  call :docurl -s -o "%WORK%\cnt.json" %ESAUTH% -X POST -H "Content-Type: application/json" --data-binary "@%EDQ%" "%ESURL%/%EDIDX%/_count?allow_no_indices=true&filter_path=count"
 ) else (
-  call :docurl -s -o "%WORK%\cnt.json" %ESAUTH% "%EDCNTURL%"
+  call :docurl -s -o "%WORK%\cnt.json" %ESAUTH% "%ESURL%/%EDIDX%/_count?allow_no_indices=true&filter_path=count"
 )
 if not "%CURLCODE%"=="200" (
   call :fail "could not read the document count of %EDIDX%, HTTP %CURLCODE%" "Nothing was changed."
